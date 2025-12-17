@@ -126,6 +126,13 @@ exports.createOrder = async (req, res) => {
       },
       credit_card: { secure: true },
       customer_details: { user_id: buyerId },
+
+      // ⏰ Tambahkan custom durasi midtrans
+      custom_expiry: {
+        order_time: new Date().toISOString(),
+        expiry_duration: 1,
+        unit: "hour", 
+      },
     };
 
     const transaction = await snap.createTransaction(parameter);
@@ -315,7 +322,7 @@ exports.getDetailUserOrder = async (req, res) => {
           review: review || null,
           isReviewed: !!review,
         };
-      }),
+      })
     );
 
     return res.status(200).json({
@@ -373,7 +380,7 @@ exports.confirmOrderCompleted = async (req, res) => {
     // Update order items to confirmed
     const result = await OrderItem.updateMany(
       { order: orderId },
-      { $set: { isConfirmed: true } },
+      { $set: { isConfirmed: true } }
     );
 
     // 🔍 Ambil admin users
