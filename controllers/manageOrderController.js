@@ -68,7 +68,7 @@ exports.updateOrderStatus = async (req, res) => {
 exports.createOfflineOrder = async (req, res) => {
   try {
     const admin = req.user;
-    const { items, paymentMethod, buyerId } = req.body;
+    const { items, paymentMethod } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ msg: "Items are required" });
@@ -82,7 +82,7 @@ exports.createOfflineOrder = async (req, res) => {
     const offlineOrder = await Order.create({
       orderType: "offline",
       paymentMethod,
-      buyer: buyerId || admin._id,
+      buyer: admin._id,
       createdBy: admin._id,
       totalPrice: 0,
       status:"completed",

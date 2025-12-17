@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 
 const orderSchema = new mongoose.Schema(
   {
+    // ⭐ CUSTOM ORDER ID
+    orderId: {
+      type: String,
+      unique: true,
+    },
+
     // online/offline order
     orderType: {
       type: String,
@@ -40,7 +46,6 @@ const orderSchema = new mongoose.Schema(
     // method pembayaran
     paymentMethod: {
       type: String,
-      enum: ["midtrans", "cash", "transfer", "qris"],
       default: "midtrans",
     },
 
@@ -67,5 +72,32 @@ const orderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+// ⭐ GENERATE CUSTOM ORDER ID SEBELUM SAVE
+orderSchema.pre("save", async function (next) {
+  if (!this.orderId && this.isNew) {
+    const date = new Date();
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const dateStr = `${year}${month}${day}`;
+
+    // Hitung jumlah order hari ini
+    const todayStart = new Date(date.setHours(0, 0, 0, 0));
+    const todayEnd = new Date(date.setHours(23, 59, 59, 999));
+
+    const count = await mongoose.model("Order").countDocuments({
+      createdAt: {
+        $gte: todayStart,
+        $lt: todayEnd,
+      },
+    });
+
+    // Format: ONL-20241204-001 atau OFF-20241204-001
+    const prefix = this.orderType === "online" ? "ONL" : "OFF";
+    this.orderId = `${prefix}-${dateStr}-${String(count + 1).padStart(3, "0")}`;
+  }
+  next();
+});
 
 module.exports = mongoose.model("Order", orderSchema);

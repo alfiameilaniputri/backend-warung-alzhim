@@ -2,7 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const mongoose = require("mongoose");
 const Product = require("../models/Product");
-const Category = require("../models/Category")
+const Category = require("../models/Category");
+const Order = require("../models/Order");
+const OrderItem = require("../models/OrderItem");
+const Review = require("../models/Review");
 
 exports.createProduct = async (req, res) => {
   try {
@@ -26,7 +29,7 @@ exports.createProduct = async (req, res) => {
       category,
       images,
       price: Number(price),
-      stock: Number(stock) || 0
+      stock: Number(stock) || 0,
     });
 
     return res.status(201).json({
@@ -34,7 +37,6 @@ exports.createProduct = async (req, res) => {
       message: "Product created successfully",
       data: newProduct,
     });
-
   } catch (error) {
     console.error("Create Product Error:", error);
 
@@ -46,21 +48,88 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-
 // Get all products
 exports.getAllProducts = async (req, res) => {
   try {
+    // 1. Ambil semua produk
     const products = await Product.find()
       .populate("category", "name")
       .sort({ createdAt: -1 });
 
+    // 2. Tambahkan sold + review + average rating
+    const productsWithExtraData = await Promise.all(
+      products.map(async (product) => {
+        // =========================
+        // HITUNG SOLD
+        // =========================
+        const soldItems = await OrderItem.aggregate([
+          {
+            $match: { product: product._id },
+          },
+          {
+            $lookup: {
+              from: "orders",
+              localField: "order",
+              foreignField: "_id",
+              as: "order",
+            },
+          },
+          { $unwind: "$order" },
+          {
+            $match: {
+              "order.status": { $ne: "pending" },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalSold: { $sum: "$quantity" },
+            },
+          },
+        ]);
+
+        const sold = soldItems[0]?.totalSold || 0;
+
+        // =========================
+        // AMBIL REVIEW
+        // =========================
+        const reviews = await Review.find({ product: product._id })
+          .populate("buyer", "name")
+          .sort({ createdAt: -1 });
+
+        // =========================
+        // HITUNG AVERAGE RATING
+        // =========================
+        const ratingStats = await Review.aggregate([
+          { $match: { product: product._id } },
+          {
+            $group: {
+              _id: "$product",
+              averageRating: { $avg: "$rating" },
+              totalReview: { $sum: 1 },
+            },
+          },
+        ]);
+
+        const averageRating = ratingStats[0]?.averageRating || 0;
+        const totalReview = ratingStats[0]?.totalReview || 0;
+
+        return {
+          ...product.toObject(),
+          sold,
+          reviews,
+          averageRating: Number(averageRating.toFixed(1)),
+          totalReview,
+        };
+      }),
+    );
+
     return res.status(200).json({
       success: true,
       message: "Products retrieved successfully",
-      count: products.length,
-      data: products,
+      count: productsWithExtraData.length,
+      data: productsWithExtraData,
     });
-
   } catch (error) {
     console.error("Get All Products Error:", error);
     return res.status(500).json({
@@ -96,7 +165,6 @@ exports.getDetailProduct = async (req, res) => {
       message: "Product retrieved successfully",
       data: product,
     });
-
   } catch (error) {
     console.error("Get Detail Product Error:", error);
     return res.status(500).json({
@@ -162,7 +230,6 @@ exports.searchProducts = async (req, res) => {
       },
       data: products,
     });
-
   } catch (error) {
     console.error("Search Products Error:", error);
     return res.status(500).json({
@@ -191,26 +258,26 @@ exports.updateProduct = async (req, res) => {
 
     // Jika ada gambar baru => hapus gambar lama & set gambar baru
     if (req.files && req.files.length > 0) {
-
       // Hapus file lama di folder
-      product.images.forEach(img => {
+      product.images.forEach((img) => {
         const filePath = path.join(__dirname, `../public/products/${img}`);
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
       });
 
       // Set gambar baru
-      updateData.images = req.files.map(file => file.filename);
+      updateData.images = req.files.map((file) => file.filename);
     }
 
     // Update data
-    const updatedProduct = await Product.findByIdAndUpdate(id, updateData, { new: true });
+    const updatedProduct = await Product.findByIdAndUpdate(id, updateData, {
+      new: true,
+    });
 
     return res.status(200).json({
       success: true,
       message: "Product updated successfully",
       data: updatedProduct,
     });
-
   } catch (error) {
     console.error("Update Product Error:", error);
     return res.status(500).json({
@@ -250,9 +317,8 @@ exports.deleteProduct = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Product deleted successfully"
+      message: "Product deleted successfully",
     });
-
   } catch (error) {
     console.error("Delete Product Error:", error);
     return res.status(500).json({

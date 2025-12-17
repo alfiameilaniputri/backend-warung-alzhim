@@ -20,6 +20,49 @@ exports.createOrder = async (req, res) => {
     const { items } = req.body;
     const buyerId = req.user.id;
 
+    // ===============================
+    // CEK ADMIN AKTIF
+    // ===============================
+    const admin = await User.findOne({ role: "admin" });
+
+    if (!admin) {
+      return res.status(403).json({
+        success: false,
+        message: "Tidak dapat melanjutkan order. Admin tidak ditemukan.",
+      });
+    }
+
+    if (admin.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: "Tidak dapat melanjutkan order. Admin sedang tidak aktif.",
+      });
+    }
+
+    const buyer = await User.findById(buyerId);
+
+    if (!buyer) {
+      return res.status(404).json({
+        success: false,
+        message: "User tidak ditemukan",
+      });
+    }
+
+    // CEK DATA PENGIRIMAN
+    if (
+      !buyer.name ||
+      buyer.name.trim() === "" ||
+      !buyer.phone_number ||
+      buyer.phone_number.trim() === "" ||
+      !buyer.address ||
+      buyer.address.trim() === ""
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Data pengiriman wajib diisi",
+      });
+    }
+
     if (!items || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -95,7 +138,7 @@ exports.createOrder = async (req, res) => {
     // CREATE NOTIFICATIONS
     // ===============================
 
-    const buyer = await User.findById(buyerId);
+    // const buyer = await User.findById(buyerId);
 
     // Notification to User
     await Notification.create({
@@ -118,7 +161,6 @@ exports.createOrder = async (req, res) => {
         items: orderItems,
       },
     });
-
   } catch (error) {
     console.error("Create Order Error:", error);
     return res.status(500).json({
@@ -129,7 +171,6 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-
 // 🔹 HANDLE MIDTRANS NOTIFICATION
 exports.paymentOrder = async (req, res) => {
   try {
@@ -139,32 +180,55 @@ exports.paymentOrder = async (req, res) => {
     const order = await Order.findById(orderId).populate("buyer");
     if (!order) return res.status(404).json({ msg: "Order not found" });
 
-    let newStatus = order.status;
     const transactionStatus = notification.transaction_status;
+    const paymentType = notification.payment_type;
+
+    // ==============================================
+    // GET REAL PAYMENT METHOD NAME FROM MIDTRANS DATA
+    // ==============================================
+    let paymentMethod = "Midtrans";
+
+    if (
+      paymentType === "bank_transfer" &&
+      notification.va_numbers?.length > 0
+    ) {
+      paymentMethod = notification.va_numbers[0].bank.toUpperCase(); // BCA, BNI, BRI, MANDIRI
+    } else if (paymentType === "cstore") {
+      paymentMethod = notification.store?.toUpperCase() || "CSTORE"; // ALFAMART / INDOMARET
+    } else if (paymentType === "qris") {
+      paymentMethod = "QRIS";
+    } else if (paymentType === "gopay") {
+      paymentMethod = "GOPAY";
+    } else if (paymentType === "shopeepay") {
+      paymentMethod = "SHOPEEPAY";
+    } else if (paymentType === "echannel") {
+      paymentMethod = "MANDIRI BILL";
+    }
+
+    let newStatus = order.status;
 
     if (transactionStatus === "settlement" || transactionStatus === "capture") {
       newStatus = "paid";
       order.snapToken = null;
       order.redirectUrl = null;
+      order.paymentMethod = paymentMethod;
 
       // ============================
       // CREATE NOTIFICATION EVENT
       // ============================
 
-      // Notif to User
       await Notification.create({
         user: order.buyer._id,
         title: "Pembayaran Berhasil",
-        message: `Pembayaran untuk pesanan dengan ID ${order._id} telah berhasil. Pesanan Anda akan segera diproses.`,
+        message: `Pembayaran untuk pesanan dengan ID ${order.orderId} telah berhasil menggunakan metode ${paymentMethod}. Pesanan Anda akan segera diproses.`,
       });
 
-      // Notif to Admin
       const admins = await User.find({ role: "admin" });
       for (const admin of admins) {
         await Notification.create({
           user: admin._id,
           title: "Pesanan Sudah Dibayar",
-          message: `Pesanan dari ${order.buyer.name} dengan ID ${order._id} sudah dibayar. Segera proses pengantaran.`,
+          message: `Pesanan dari ${order.buyer.name} dengan ID ${order.orderId} sudah dibayar melalui ${paymentMethod}. Segera proses pengantaran.`,
         });
       }
     } else if (transactionStatus === "cancel") {
@@ -180,6 +244,7 @@ exports.paymentOrder = async (req, res) => {
       msg: "Midtrans notification processed successfully",
       orderId,
       newStatus,
+      paymentMethod,
     });
   } catch (err) {
     console.error("Payment Order Error:", err);
@@ -214,7 +279,7 @@ exports.getUserOrders = async (req, res) => {
   }
 };
 
-// 🔹 GET USER ORDER BY ID
+// 🔹 GET USER ORDER BY ID (with reviews)
 exports.getDetailUserOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -227,7 +292,7 @@ exports.getDetailUserOrder = async (req, res) => {
         path: "items",
         populate: { path: "product", select: "name price images description" },
       })
-      .populate("buyer", "name email");
+      .populate("buyer", "name email phone address"); // ← Ubah ini, tambah phone dan address
 
     if (!order) {
       return res.status(404).json({
@@ -248,8 +313,9 @@ exports.getDetailUserOrder = async (req, res) => {
         return {
           ...item.toObject(),
           review: review || null,
+          isReviewed: !!review,
         };
-      })
+      }),
     );
 
     return res.status(200).json({
@@ -260,7 +326,6 @@ exports.getDetailUserOrder = async (req, res) => {
         items: itemsWithReview,
       },
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -308,7 +373,7 @@ exports.confirmOrderCompleted = async (req, res) => {
     // Update order items to confirmed
     const result = await OrderItem.updateMany(
       { order: orderId },
-      { $set: { isConfirmed: true } }
+      { $set: { isConfirmed: true } },
     );
 
     // 🔍 Ambil admin users
@@ -317,9 +382,9 @@ exports.confirmOrderCompleted = async (req, res) => {
     // 🔔 Send notification to all admins
     for (const admin of admins) {
       await Notification.create({
-        user: admin._id, 
+        user: admin._id,
         title: "Order Completed",
-        message: `Buyer ${order.buyer.name} confirmed order #${order._id} as completed.`,
+        message: `Buyer ${order.buyer.name} confirmed order #${order.orderId} as completed.`,
         type: "order_completed",
         isRead: false,
         relatedOrder: order._id,
@@ -328,7 +393,8 @@ exports.confirmOrderCompleted = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Order successfully confirmed as completed & notification sent to admin.",
+      message:
+        "Order successfully confirmed as completed & notification sent to admin.",
       meta: {
         updatedItems: result.modifiedCount,
       },
@@ -337,7 +403,6 @@ exports.confirmOrderCompleted = async (req, res) => {
         status: order.status,
       },
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,

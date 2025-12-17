@@ -2,24 +2,30 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const nodemailer = require("nodemailer");
+const Order = require("../models/Order");
 
 // REGISTER
 exports.register = async (req, res) => {
   try {
     // ambil input data user
-    const {
-      name, email, password, username, phone_number, address
-    } = req.body;
+    const { name, email, password, username, phone_number, address } = req.body;
 
     // Cek apakah semua field terisi
-    if (!name || !email || !password || !username || !phone_number || !address) {
+    if (
+      !name ||
+      !email ||
+      !password ||
+      !username ||
+      !phone_number ||
+      !address
+    ) {
       return res.status(400).json({
         success: false,
         status_code: 400,
         message: "Validation error",
         errors: {
-          fields: "Semua field wajib diisi!"
-        }
+          fields: "Semua field wajib diisi!",
+        },
       });
     }
 
@@ -30,8 +36,8 @@ exports.register = async (req, res) => {
         status_code: 400,
         message: "Validation error",
         errors: {
-          password: "Password minimal harus 8 karakter!"
-        }
+          password: "Password minimal harus 8 karakter!",
+        },
       });
     }
 
@@ -41,10 +47,10 @@ exports.register = async (req, res) => {
       return res.status(409).json({
         success: false,
         status_code: 409,
-        message: "Conflict",
+        message: "Email sudah digunakan",
         errors: {
-          email: "Email already exists"
-        }
+          email: "Email already exists",
+        },
       });
     }
 
@@ -73,9 +79,9 @@ exports.register = async (req, res) => {
           email,
           username,
           phone_number,
-          address
-        }
-      }
+          address,
+        },
+      },
     });
   } catch (err) {
     console.error(err);
@@ -84,7 +90,7 @@ exports.register = async (req, res) => {
       success: false,
       status_code: 500,
       message: "Internal server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
@@ -100,23 +106,35 @@ exports.login = async (req, res) => {
         success: false,
         status_code: 400,
         message: "Validation error",
-        errors: {
-          fields: "Email dan password wajib diisi"
-        }
+        errors: { fields: "Email dan password wajib diisi" },
       });
     }
 
-    // Cari user
+    // Cari user berdasarkan email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({
         success: false,
         status_code: 404,
-        message: "User not found",
-        errors: {
-          email: "Email tidak terdaftar"
-        }
+        message: "Pengguna tidak ditemukan",
+        errors: { email: "Email tidak terdaftar" },
       });
+    }
+
+    // Cek status toko (hanya untuk user biasa)
+    if (user.role !== "admin") {
+      const storeStatus = await User.findOne({ role: "admin" });
+
+      if (!storeStatus || storeStatus.isActive !== true) {
+        return res.status(403).json({
+          success: false,
+          status_code: 403,
+          message: "Warung sedang tidak aktif",
+          errors: {
+            store: "Silakan coba lagi nanti",
+          },
+        });
+      }
     }
 
     // Cek password
@@ -125,10 +143,8 @@ exports.login = async (req, res) => {
       return res.status(401).json({
         success: false,
         status_code: 401,
-        message: "Invalid credentials",
-        errors: {
-          password: "Password salah"
-        }
+        message: "Kredensial tidak valid",
+        errors: { password: "Kata Sandi salah" },
       });
     }
 
@@ -136,10 +152,10 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" }
+      { expiresIn: "1d" },
     );
 
-    // Respons sukses profesional
+    // Respons sukses
     return res.status(200).json({
       success: true,
       status_code: 200,
@@ -150,18 +166,18 @@ exports.login = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          role: user.role
-        }
-      }
+          role: user.role,
+          isActive: user.isActive,
+        },
+      },
     });
-
   } catch (err) {
     console.error(err);
     return res.status(500).json({
       success: false,
       status_code: 500,
       message: "Internal server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
@@ -175,7 +191,7 @@ exports.forgotPassword = async (req, res) => {
         success: false,
         status_code: 400,
         message: "Validation error",
-        errors: { email: "Email wajib diisi" }
+        errors: { email: "Email wajib diisi" },
       });
     }
 
@@ -184,28 +200,26 @@ exports.forgotPassword = async (req, res) => {
       return res.status(404).json({
         success: false,
         status_code: 404,
-        message: "User not found",
-        errors: { email: "Email tidak terdaftar" }
+        message: "Pengguna tidak ditemukan",
+        errors: { email: "Email tidak terdaftar" },
       });
     }
 
     // Generate token reset password (expired 15 menit)
-    const resetToken = jwt.sign(
-      { id: user._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "15m" }
-    );
+    const resetToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "15m",
+    });
 
     // Link reset password
-    const resetLink = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
+    const resetLink = `https://warung-alzhim.vercel.app/reset-password/${resetToken}`;
 
     // Kirim email
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: {
         user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
+        pass: process.env.EMAIL_PASS,
+      },
     });
 
     await transporter.sendMail({
@@ -216,22 +230,21 @@ exports.forgotPassword = async (req, res) => {
         <p>Klik link berikut untuk reset password:</p>
         <a href="${resetLink}">${resetLink}</a>
         <p>Link berlaku selama 15 menit.</p>
-      `
+      `,
     });
 
     return res.status(200).json({
       success: true,
       status_code: 200,
-      message: "Reset password link telah dikirim ke email Anda"
+      message: "Reset password link telah dikirim ke email Anda",
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({
       success: false,
       status_code: 500,
       message: "Internal server error",
-      error: err.message
+      error: err.message,
     });
   }
 };
@@ -246,7 +259,7 @@ exports.resetPassword = async (req, res) => {
         success: false,
         status_code: 400,
         message: "Validation error",
-        errors: { password: "Password baru wajib diisi" }
+        errors: { password: "Password baru wajib diisi" },
       });
     }
 
@@ -255,7 +268,7 @@ exports.resetPassword = async (req, res) => {
         success: false,
         status_code: 400,
         message: "Validation error",
-        errors: { password: "Password minimal 8 karakter" }
+        errors: { password: "Password minimal 8 karakter" },
       });
     }
 
@@ -268,7 +281,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(404).json({
         success: false,
         status_code: 404,
-        message: "User tidak ditemukan"
+        message: "User tidak ditemukan",
       });
     }
 
@@ -282,9 +295,8 @@ exports.resetPassword = async (req, res) => {
     return res.status(200).json({
       success: true,
       status_code: 200,
-      message: "Password berhasil diperbarui"
+      message: "Password berhasil diperbarui",
     });
-
   } catch (err) {
     console.error(err);
 
@@ -298,7 +310,7 @@ exports.resetPassword = async (req, res) => {
       success: false,
       status_code: 400,
       message: "Invalid or expired token",
-      error: errorMessage
+      error: errorMessage,
     });
   }
 };
@@ -307,26 +319,118 @@ exports.resetPassword = async (req, res) => {
 exports.getUserProfile = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-      return res.status(401).json({ msg: 'Token tidak ditemukan' });
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ msg: "Token tidak ditemukan" });
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     const user = await User.findById(decoded.id)
-      .select('-password')
-      .populate('address'); // hanya populate address
+      .select("-password")
+      .populate("address"); // hanya populate address
 
-    if (!user) return res.status(404).json({ msg: 'User tidak ditemukan' });
+    if (!user) return res.status(404).json({ msg: "User tidak ditemukan" });
 
     res.status(200).json({ user });
   } catch (err) {
-    res.status(401).json({ msg: 'Token tidak valid atau sudah kadaluarsa' });
+    res.status(401).json({ msg: "Token tidak valid atau sudah kadaluarsa" });
   }
 };
 
 // UPDATE PROFILE
+// exports.updateProfile = async (req, res) => {
+//   try {
+//     const authHeader = req.headers.authorization;
+//     if (!authHeader?.startsWith("Bearer ")) {
+//       return res.status(401).json({
+//         success: false,
+//         status_code: 401,
+//         message: "Token tidak ditemukan"
+//       });
+//     }
+
+//     const token = authHeader.split(" ")[1];
+//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+//     const { name, username, phone_number, address, oldPassword, newPassword } = req.body;
+
+//     // Cari user berdasarkan token
+//     const user = await User.findById(decoded.id);
+//     if (!user) {
+//       return res.status(404).json({
+//         success: false,
+//         status_code: 404,
+//         message: "User tidak ditemukan"
+//       });
+//     }
+
+//     // Jika ingin update password juga
+//     if (newPassword) {
+//       if (!oldPassword) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Old password diperlukan untuk mengubah password"
+//         });
+//       }
+
+//       const match = await bcrypt.compare(oldPassword, user.password);
+//       if (!match) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Old password salah"
+//         });
+//       }
+
+//       if (newPassword.length < 8) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "Password minimal 8 karakter"
+//         });
+//       }
+
+//       user.password = await bcrypt.hash(newPassword, 10);
+//     }
+
+//     // Update field lain
+//     user.name = name || user.name;
+//     user.username = username || user.username;
+//     user.phone_number = phone_number || user.phone_number;
+//     user.address = address || user.address;
+
+//     await user.save();
+
+//     return res.status(200).json({
+//       success: true,
+//       status_code: 200,
+//       message: "Profile updated successfully",
+//       data: {
+//         user: {
+//           id: user._id,
+//           name: user.name,
+//           username: user.username,
+//           email: user.email,
+//           phone_number: user.phone_number,
+//           address: user.address,
+//           role: user.role
+//         }
+//       }
+//     });
+
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       status_code: 500,
+//       message: "Internal server error",
+//       error: error.message
+//     });
+//   }
+// };
+
+const fs = require("fs");
+const path = require("path");
+const sharp = require("sharp");
+
 exports.updateProfile = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -334,14 +438,15 @@ exports.updateProfile = async (req, res) => {
       return res.status(401).json({
         success: false,
         status_code: 401,
-        message: "Token tidak ditemukan"
+        message: "Token tidak ditemukan",
       });
     }
 
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    const { name, username, phone_number, address, oldPassword, newPassword } = req.body;
+    const { name, username, phone_number, address, oldPassword, newPassword } =
+      req.body;
 
     // Cari user berdasarkan token
     const user = await User.findById(decoded.id);
@@ -349,35 +454,58 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({
         success: false,
         status_code: 404,
-        message: "User tidak ditemukan"
+        message: "User tidak ditemukan",
       });
     }
 
-    // Jika ingin update password juga
+    // Update password jika dikirim
     if (newPassword) {
       if (!oldPassword) {
-        return res.status(400).json({
-          success: false,
-          message: "Old password diperlukan untuk mengubah password"
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Old password diperlukan" });
       }
 
       const match = await bcrypt.compare(oldPassword, user.password);
       if (!match) {
-        return res.status(400).json({
-          success: false,
-          message: "Old password salah"
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Old password salah" });
       }
 
       if (newPassword.length < 8) {
-        return res.status(400).json({
-          success: false,
-          message: "Password minimal 8 karakter"
-        });
+        return res
+          .status(400)
+          .json({ success: false, message: "Password minimal 8 karakter" });
       }
 
       user.password = await bcrypt.hash(newPassword, 10);
+    }
+
+    // ====== UPDATE PROFILE IMAGE ======
+    if (req.file) {
+      const uploadPath = path.join(__dirname, "../public/user_profile");
+
+      // Hapus file lama jika ada
+      if (user.profileImage) {
+        const oldPath = path.join(uploadPath, user.profileImage);
+        if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      }
+
+      // Ambil ekstensi dari file asli
+      const ext = path.extname(req.file.originalname).toLowerCase(); // .jpg, .png, dll
+
+      // Buat nama file baru
+      const newFilename = `profile_${user.username}_${Date.now()}${ext}`;
+
+      // Simpan file yang sudah diresize
+      await sharp(req.file.buffer)
+        .resize(400, 400, { fit: "cover" })
+        .toFormat(ext === ".png" ? "png" : "jpeg", { quality: 90 })
+        .toFile(path.join(uploadPath, newFilename));
+
+      // Simpan nama file ke DB
+      user.profileImage = newFilename;
     }
 
     // Update field lain
@@ -400,17 +528,109 @@ exports.updateProfile = async (req, res) => {
           email: user.email,
           phone_number: user.phone_number,
           address: user.address,
-          role: user.role
-        }
-      }
+          profileImage: user.profileImage,
+          role: user.role,
+        },
+      },
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
       status_code: 500,
       message: "Internal server error",
-      error: error.message
+      error: error.message,
+    });
+  }
+};
+
+exports.updateActiveStatus = async (req, res) => {
+  try {
+    const { isActive } = req.body; // true / false
+    const userId = req.user.id; // dari middleware JWT
+
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "isActive harus berupa boolean (true / false)",
+      });
+    }
+
+    // Cek hanya jika ingin menonaktifkan toko
+    if (!isActive) {
+      const hasUndeliveredOrders = await Order.exists({
+        status: { $in: ["paid", "delivered"] },
+      });
+
+      if (hasUndeliveredOrders) {
+        return res.status(403).json({
+          success: false,
+          status_code: 403,
+          message: "Tidak dapat menonaktifkan toko",
+          errors: {
+            order: "Masih ada pesanan yang belum dikirim",
+          },
+        });
+      }
+    }
+
+    // 🔍 Cari user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User tidak ditemukan",
+      });
+    }
+
+    user.isActive = isActive;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `Status toko berhasil diubah menjadi ${isActive ? "Aktif" : "Non-Aktif"}`,
+      data: {
+        id: user._id,
+        name: user.name,
+        isActive: user.isActive,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getStoreStatus = async (req, res) => {
+  try {
+    // Ambil admin pertama
+    const admin = await User.findOne({ role: "admin" });
+
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        status_code: 404,
+        message: "Admin tidak ditemukan",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      status_code: 200,
+      message: "Berhasil mengambil status aktif store",
+      data: {
+        isActive: admin.isActive,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      status_code: 500,
+      message: "Internal server error",
+      error: error.message,
     });
   }
 };
