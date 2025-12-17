@@ -33,6 +33,12 @@ app.use((err, req, res, next) => {
   res.status(500).json({ msg: "Something went wrong!" });
 });
 
+
+// Root route (untuk ngecek status server di Railway)
+app.get("/", (req, res) => {
+  res.send("🚀 Warung Alzhim Backend is running successfully on Railway!");
+});
+
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
