@@ -28,7 +28,7 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    // Validasi owner / buyer
+   // Validasi kepemilikan (user hanya boleh review pesanannya sendiri)
     if (item.order.buyer.toString() !== buyer.toString()) {
       return res.status(403).json({
         success: false,
@@ -86,8 +86,8 @@ exports.getProductReviews = async (req, res) => {
     const { productId } = req.params;
 
     const reviews = await Review.find({ product: productId })
-      .populate("buyer", "name")
-      .sort({ createdAt: -1 });
+      .populate("buyer", "name")  // Tampilkan nama user yang memberi review
+      .sort({ createdAt: -1 });  // Urutkan dari review terbaru
 
     res.status(200).json({ msg: "Reviews fetched", reviews });
   } catch (err) {

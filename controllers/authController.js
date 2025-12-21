@@ -54,10 +54,10 @@ exports.register = async (req, res) => {
       });
     }
 
-    // hash password
+    // hash atau enkripsi password sebelum disimpan
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // simpan data ke database
+    // simpan data user baru ke database
     const user = await User.create({
       name,
       username,
@@ -68,7 +68,7 @@ exports.register = async (req, res) => {
       role: "user",
     });
 
-    // pesan berhasil register
+    // kirim respons sukses : pesan berhasil register
     res.status(201).json({
       success: true,
       status_code: 201,
@@ -121,7 +121,7 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Cek status toko (hanya untuk user biasa)
+    // Cek status warung (hanya untuk user biasa bukan admin)
     if (user.role !== "admin") {
       const storeStatus = await User.findOne({ role: "admin" });
 
@@ -137,7 +137,7 @@ exports.login = async (req, res) => {
       }
     }
 
-    // Cek password
+    // Cek password yang diinput = password yang di-hash
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(401).json({
@@ -148,14 +148,14 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Generate token
+    // Generate token (buat token login JWT)
     const token = jwt.sign(
       { id: user._id, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: "1d" },
+      { expiresIn: "1d" }
     );
 
-    // Respons sukses
+    // kirim Respons sukses
     return res.status(200).json({
       success: true,
       status_code: 200,
@@ -182,10 +182,12 @@ exports.login = async (req, res) => {
   }
 };
 
+//LUPA PASSWORD
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
+    //validasi input email
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -195,6 +197,7 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
+    //cari user berdasarkan email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({
@@ -205,7 +208,7 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate token reset password (expired 15 menit)
+    // Generate (buat) token reset password (expired 15 menit)
     const resetToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "15m",
     });
@@ -213,15 +216,16 @@ exports.forgotPassword = async (req, res) => {
     // Link reset password
     const resetLink = `https://warung-alzhim.vercel.app/reset-password/${resetToken}`;
 
-    // Kirim email
+    // Membuat koneksi pengirim email dengan Gmail
     const transporter = nodemailer.createTransport({
-      service: "gmail",
+      service: "gmail", // layanan email yang digunakan
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
+        user: process.env.EMAIL_USER, // ambil email dari .env
+        pass: process.env.EMAIL_PASS, // ambil password dari .env
       },
     });
 
+    // Kirim email ke user berisi link reset password
     await transporter.sendMail({
       from: "Your App",
       to: email,
@@ -249,6 +253,8 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
+//RESET PASSWORD
+//Verifikasi token reset dan perbarui password pengguna
 exports.resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
@@ -272,10 +278,10 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // Verify token JWT
+    // Verify token JWT dari link
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // Ambil user berdasarkan decoded.id
+    // Ambil user berdasarkan decoded.id (token)
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({
@@ -315,7 +321,8 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// GET USER BY TOKEN
+// GET PROFILE USER BY TOKEN
+// Mengambil data profil user dari token login
 exports.getUserProfile = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -323,9 +330,11 @@ exports.getUserProfile = async (req, res) => {
       return res.status(401).json({ msg: "Token tidak ditemukan" });
     }
 
+    // Verifikasi token JWT
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+    // Ambil data user tanpa password
     const user = await User.findById(decoded.id)
       .select("-password")
       .populate("address"); // hanya populate address
@@ -338,102 +347,14 @@ exports.getUserProfile = async (req, res) => {
   }
 };
 
-// UPDATE PROFILE
-// exports.updateProfile = async (req, res) => {
-//   try {
-//     const authHeader = req.headers.authorization;
-//     if (!authHeader?.startsWith("Bearer ")) {
-//       return res.status(401).json({
-//         success: false,
-//         status_code: 401,
-//         message: "Token tidak ditemukan"
-//       });
-//     }
-
-//     const token = authHeader.split(" ")[1];
-//     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-//     const { name, username, phone_number, address, oldPassword, newPassword } = req.body;
-
-//     // Cari user berdasarkan token
-//     const user = await User.findById(decoded.id);
-//     if (!user) {
-//       return res.status(404).json({
-//         success: false,
-//         status_code: 404,
-//         message: "User tidak ditemukan"
-//       });
-//     }
-
-//     // Jika ingin update password juga
-//     if (newPassword) {
-//       if (!oldPassword) {
-//         return res.status(400).json({
-//           success: false,
-//           message: "Old password diperlukan untuk mengubah password"
-//         });
-//       }
-
-//       const match = await bcrypt.compare(oldPassword, user.password);
-//       if (!match) {
-//         return res.status(400).json({
-//           success: false,
-//           message: "Old password salah"
-//         });
-//       }
-
-//       if (newPassword.length < 8) {
-//         return res.status(400).json({
-//           success: false,
-//           message: "Password minimal 8 karakter"
-//         });
-//       }
-
-//       user.password = await bcrypt.hash(newPassword, 10);
-//     }
-
-//     // Update field lain
-//     user.name = name || user.name;
-//     user.username = username || user.username;
-//     user.phone_number = phone_number || user.phone_number;
-//     user.address = address || user.address;
-
-//     await user.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       status_code: 200,
-//       message: "Profile updated successfully",
-//       data: {
-//         user: {
-//           id: user._id,
-//           name: user.name,
-//           username: user.username,
-//           email: user.email,
-//           phone_number: user.phone_number,
-//           address: user.address,
-//           role: user.role
-//         }
-//       }
-//     });
-
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       status_code: 500,
-//       message: "Internal server error",
-//       error: error.message
-//     });
-//   }
-// };
-
-const fs = require("fs");
-const path = require("path");
-const sharp = require("sharp");
+const fs = require("fs");     // Modul bawaan Node.js untuk membaca, menulis, dan menghapus file
+const path = require("path"); // Modul untuk mengatur dan menggabungkan path folder atau file
+const sharp = require("sharp"); // Library untuk mengedit atau memperkecil ukuran gambar (resize foto profil)
 
 exports.updateProfile = async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
+    // Cek apakah token dikirim melalui header
     if (!authHeader?.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
@@ -442,13 +363,14 @@ exports.updateProfile = async (req, res) => {
       });
     }
 
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.split(" ")[1];  // Ambil token dari header
+    const decoded = jwt.verify(token, process.env.JWT_SECRET); // Verifikasi token JWT
 
+    // Ambil data dari body request
     const { name, username, phone_number, address, oldPassword, newPassword } =
       req.body;
 
-    // Cari user berdasarkan token
+    // Cari user berdasarkan ID hasil decode token
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({
@@ -466,6 +388,7 @@ exports.updateProfile = async (req, res) => {
           .json({ success: false, message: "Old password diperlukan" });
       }
 
+      //Bandingkan password lama dengan yang tersimpan di db
       const match = await bcrypt.compare(oldPassword, user.password);
       if (!match) {
         return res
@@ -473,18 +396,20 @@ exports.updateProfile = async (req, res) => {
           .json({ success: false, message: "Old password salah" });
       }
 
+      //validasi panjang pw baru
       if (newPassword.length < 8) {
         return res
           .status(400)
           .json({ success: false, message: "Password minimal 8 karakter" });
       }
 
+      //simpan pw baru setelah di hash
       user.password = await bcrypt.hash(newPassword, 10);
     }
 
     // ====== UPDATE PROFILE IMAGE ======
     if (req.file) {
-      const uploadPath = path.join(__dirname, "../public/user_profile");
+      const uploadPath = path.join(__dirname, "../public/user_profile"); //tentukan folder penyimpanan foto
 
       // Hapus file lama jika ada
       if (user.profileImage) {
@@ -495,7 +420,7 @@ exports.updateProfile = async (req, res) => {
       // Ambil ekstensi dari file asli
       const ext = path.extname(req.file.originalname).toLowerCase(); // .jpg, .png, dll
 
-      // Buat nama file baru
+      // Buat nama file baru agar unik
       const newFilename = `profile_${user.username}_${Date.now()}${ext}`;
 
       // Simpan file yang sudah diresize
@@ -508,13 +433,13 @@ exports.updateProfile = async (req, res) => {
       user.profileImage = newFilename;
     }
 
-    // Update field lain
+    // Update data profil lain
     user.name = name || user.name;
     user.username = username || user.username;
     user.phone_number = phone_number || user.phone_number;
     user.address = address || user.address;
 
-    await user.save();
+    await user.save(); //simpan semua perubahan ke db
 
     return res.status(200).json({
       success: true,
@@ -543,11 +468,13 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
+//Update status warung
 exports.updateActiveStatus = async (req, res) => {
   try {
-    const { isActive } = req.body; // true / false
-    const userId = req.user.id; // dari middleware JWT
+    const { isActive } = req.body; //Ambil status baru (true / false)
+    const userId = req.user.id;  //Dapat dari middleware JWT
 
+    //Validasi nilai harus boolean
     if (typeof isActive !== "boolean") {
       return res.status(400).json({
         success: false,
@@ -555,12 +482,13 @@ exports.updateActiveStatus = async (req, res) => {
       });
     }
 
-    // Cek hanya jika ingin menonaktifkan toko
+    //Cek jika warung ingin dinonaktifkan, pastikan tidak ada pesanan aktif
     if (!isActive) {
       const hasUndeliveredOrders = await Order.exists({
         status: { $in: ["paid", "delivered"] },
       });
 
+      //Jika masih ada pesanan, tolak perubahan status
       if (hasUndeliveredOrders) {
         return res.status(403).json({
           success: false,
@@ -573,7 +501,7 @@ exports.updateActiveStatus = async (req, res) => {
       }
     }
 
-    // 🔍 Cari user
+    // Cari user yang ingin diubah statusny
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -587,7 +515,9 @@ exports.updateActiveStatus = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Status toko berhasil diubah menjadi ${isActive ? "Aktif" : "Non-Aktif"}`,
+      message: `Status warung berhasil diubah menjadi ${
+        isActive ? "Aktif" : "Non-Aktif"
+      }`,
       data: {
         id: user._id,
         name: user.name,
@@ -604,11 +534,13 @@ exports.updateActiveStatus = async (req, res) => {
   }
 };
 
+// Mengecek status aktif/nonaktif toko dari akun admin
 exports.getStoreStatus = async (req, res) => {
   try {
-    // Ambil admin pertama
+    //Cari user dengan role admin
     const admin = await User.findOne({ role: "admin" });
 
+    //Jika tidak ada admin ditemukan
     if (!admin) {
       return res.status(404).json({
         success: false,
@@ -617,10 +549,11 @@ exports.getStoreStatus = async (req, res) => {
       });
     }
 
+    //Kirim respon status aktif warung
     return res.status(200).json({
       success: true,
       status_code: 200,
-      message: "Berhasil mengambil status aktif store",
+      message: "Berhasil mengambil status aktif warung",
       data: {
         isActive: admin.isActive,
       },

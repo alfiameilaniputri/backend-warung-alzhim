@@ -3,9 +3,10 @@ const Product = require("../models/Product");
 
 exports.addCartItem = async (req, res) => {
   try {
-    const userId = req.user._id;
-    const { productId, qty } = req.body;
+    const userId = req.user._id; // Ambil ID user dari token login
+    const { productId, qty } = req.body; //Ambil ID produk dan jumlah dari input user
 
+    // Validasi input (productId & qty wajib diisi)
     if (!productId || !qty) {
       return res.status(400).json({
         success: false,
@@ -13,6 +14,7 @@ exports.addCartItem = async (req, res) => {
       });
     }
 
+    // Cek apakah produk ada di database
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -21,8 +23,11 @@ exports.addCartItem = async (req, res) => {
       });
     }
 
+    
+    // Cek apakah produk sudah pernah ditambahkan ke keranjang
     const existingItem = await Cart.findOne({ userId, productId });
 
+     // Jika sudah ada, tambahkan quantity-nya
     if (existingItem) {
       existingItem.qty += qty;
       await existingItem.save();
@@ -34,6 +39,7 @@ exports.addCartItem = async (req, res) => {
       });
     }
 
+    //jika belum ada, buat item baru di cart
     const newItem = await Cart.create({ userId, productId, qty });
 
     return res.status(201).json({
@@ -53,12 +59,13 @@ exports.addCartItem = async (req, res) => {
 
 exports.getCartItems = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user._id; // ambil id user dari token login
 
+    // Ambil semua item di cart milik user dan tampilkan detail produk + kategori
     const items = await Cart.find({ userId })
       .populate({
         path: "productId",
-        populate: { path: "category", select: "name" }
+        populate: { path: "category", select: "name" } // ambil nama kategori
       });
 
     // Hitung total price per item + total keseluruhan
@@ -70,13 +77,15 @@ exports.getCartItems = async (req, res) => {
       };
     });
 
+    
+    // Hitung total keseluruhan keranjang
     const grandTotal = dataWithTotals.reduce((sum, item) => sum + item.itemTotal, 0);
 
     return res.status(200).json({
       success: true,
       message: "Cart items retrieved successfully.",
       totalItems: items.length,
-      grandTotal,
+      grandTotal, // total semua harga barang di keranjang
       data: dataWithTotals,
     });
 
@@ -92,11 +101,11 @@ exports.getCartItems = async (req, res) => {
 
 exports.updateCartItemQty = async (req, res) => {
   try {
-    const { qty } = req.body;
-    const { id } = req.params;
+    const { qty } = req.body; // Ambil jumlah baru
+    const { id } = req.params; // Ambil ID item dari parameter URL
 
+    // Cek apakah item keranjang ada
     const item = await Cart.findById(id);
-
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -104,6 +113,7 @@ exports.updateCartItemQty = async (req, res) => {
       });
     }
 
+    // Jika jumlah <= 0, hapus item dari keranjang
     if (qty <= 0) {
       await item.deleteOne();
       return res.status(200).json({
@@ -112,6 +122,7 @@ exports.updateCartItemQty = async (req, res) => {
       });
     }
 
+    // Update jumlah barang
     item.qty = qty;
     await item.save();
 
@@ -132,10 +143,10 @@ exports.updateCartItemQty = async (req, res) => {
 
 exports.removeCartItem = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params; //Ambil ID item dari parameter
 
+     // Cek apakah item ada di keranjang
     const item = await Cart.findById(id);
-
     if (!item) {
       return res.status(404).json({
         success: false,
@@ -143,6 +154,7 @@ exports.removeCartItem = async (req, res) => {
       });
     }
 
+    // Hapus item dari db
     await item.deleteOne();
     return res.status(200).json({
       success: true,

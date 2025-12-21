@@ -6,8 +6,8 @@ const Notification = require("../models/Notification");
 // 🔹 UPDATE ORDER STATUS
 exports.updateOrderStatus = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const { status } = req.body;
+    const { orderId } = req.params; // Ambil ID order dari parameter URL
+    const { status } = req.body; // Ambil status baru dari body request
 
     const validStatus = [
       "pending",
@@ -18,6 +18,7 @@ exports.updateOrderStatus = async (req, res) => {
       "delivered",
     ];
 
+    // Cek apakah status yang dikirim valid
     if (!validStatus.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -26,6 +27,7 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
+    // Cari order berdasarkan ID dan tampilkan data pembeli
     const order = await Order.findById(orderId).populate("buyer", "name email");
     if (!order) {
       return res.status(404).json({
@@ -34,14 +36,14 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Update status & deliveredAt
+    // Update status dan waktu pengiriman jika status 'delivered'
     order.status = status;
     if (status === "delivered") {
       order.deliveredAt = new Date(); // set waktu pengiriman
     }
     await order.save();
 
-    // 🔔 Notifikasi ketika dikirim
+    // Kirim notifikasi ke user saat pesanan dikirim
     if (status === "delivered") {
       await Notification.create({
         user: order.buyer._id,
@@ -55,7 +57,6 @@ exports.updateOrderStatus = async (req, res) => {
       message: "Order status updated successfully.",
       data: order,
     });
-
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -67,9 +68,10 @@ exports.updateOrderStatus = async (req, res) => {
 
 exports.createOfflineOrder = async (req, res) => {
   try {
-    const admin = req.user;
-    const { items, paymentMethod } = req.body;
+    const admin = req.user; // Ambil data admin dari token login
+    const { items, paymentMethod } = req.body; //Ambil item dan metode pembayaran dari body
 
+    //validasi input
     if (!items || items.length === 0) {
       return res.status(400).json({ msg: "Items are required" });
     }
@@ -78,45 +80,55 @@ exports.createOfflineOrder = async (req, res) => {
       return res.status(400).json({ msg: "Payment method is required" });
     }
 
-    // Buat order utama
+    // Buat data order utama
     const offlineOrder = await Order.create({
       orderType: "offline",
       paymentMethod,
       buyer: admin._id,
       createdBy: admin._id,
       totalPrice: 0,
-      status:"completed",
-      items: []
+      status: "completed",
+      items: [],
     });
 
-    let totalAmount = 0;
+    let totalAmount = 0; // Penampung total harga semua item
 
+    // Loop setiap item produk dalam pesanan
     for (const item of items) {
       const product = await Product.findById(item.productId);
-      if (!product) return res.status(404).json({ msg: `Product not found: ${item.productId}` });
+      if (!product)
+        return res
+          .status(404)
+          .json({ msg: `Product not found: ${item.productId}` });
 
-      const qty = item.qty || item.quantity;
-      const subtotal = product.price * qty;
+      const qty = item.qty || item.quantity; // Ambil jumlah produk
+      const subtotal = product.price * qty; // Hitung subtotal harga
 
+      // Cek ketersediaan stok produk
       if (product.stock < qty) {
-        return res.status(400).json({ msg: `Insufficient stock for ${product.name}` });
+        return res
+          .status(400)
+          .json({ msg: `Insufficient stock for ${product.name}` });
       }
 
+      // Kurangi stok setelah pembelian
       product.stock -= qty;
       await product.save();
 
+      // Simpan detail item order ke OrderItem
       const orderItem = await OrderItem.create({
         order: offlineOrder._id,
         product: product._id,
         quantity: qty,
         price: product.price,
-        subtotal
+        subtotal,
       });
 
       offlineOrder.items.push(orderItem._id);
       totalAmount += subtotal;
     }
 
+    // Update total harga di order utama
     offlineOrder.totalPrice = totalAmount;
     await offlineOrder.save();
 
@@ -124,7 +136,6 @@ exports.createOfflineOrder = async (req, res) => {
       msg: "Offline order saved successfully",
       data: offlineOrder,
     });
-
   } catch (error) {
     res.status(500).json({ msg: error.message });
   }
@@ -133,6 +144,7 @@ exports.createOfflineOrder = async (req, res) => {
 // 🔹 GET ALL ORDERS
 exports.getAllOrders = async (req, res) => {
   try {
+    // Ambil semua order online dan tampilkan data pembeli dan produk
     const onlineOrders = await Order.find({ orderType: "online" })
       .populate("buyer", "name email")
       .populate("createdBy", "name email") // optional, online biasanya null
@@ -145,6 +157,7 @@ exports.getAllOrders = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
+    //ambil semua order offline
     const offlineOrders = await Order.find({ orderType: "offline" })
       .populate("buyer", "name email") // optional, order offline mungkin tidak ada buyer
       .populate("createdBy", "name email")
@@ -165,55 +178,56 @@ exports.getAllOrders = async (req, res) => {
         offlineOrders,
       },
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ msg: error.message });
   }
 };
 
+//GAT DETAIL ORDER
 exports.getDetailOrder = async (req, res) => {
   try {
-    const { orderId } = req.params;
+    const { orderId } = req.params; // ambil ID dari parameter
 
+    // Cari detail order berdasarkan ID dan tampilkan relasi pembeli + produk
     const order = await Order.findById(orderId)
       .populate({
         path: "buyer",
-        select: "name email"
+        select: "name email",
       })
       .populate({
         path: "items",
         populate: {
           path: "product",
-          select: "name description images price"
-        }
+          select: "name description images price",
+        },
       })
       .sort({ createdAt: -1 });
 
     if (!order) {
       return res.status(404).json({
         success: false,
-        message: "Order not found"
+        message: "Order not found",
       });
     }
 
+    // Kirim data detail order
     res.status(200).json({
       success: true,
       message: "Order detail fetched successfully",
-      data: order
+      data: order,
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({
       success: false,
       message: "Failed to fetch order detail",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
-// 🔹 ONLY ONLINE ORDERS
+// 🔹 GET ONLY ONLINE ORDERS
 exports.getOnlineOrders = async (req, res) => {
   try {
     const onlineOrders = await Order.find({ orderType: "online" })
@@ -225,13 +239,12 @@ exports.getOnlineOrders = async (req, res) => {
       .sort({ createdAt: -1 });
 
     res.status(200).json({ msg: "Online orders fetched", data: onlineOrders });
-
   } catch (error) {
     res.status(500).json({ msg: error.message });
   }
 };
 
-// 🔹 ONLY OFFLINE ORDERS
+// 🔹 GET ONLY OFFLINE ORDERS
 exports.getOfflineOrders = async (req, res) => {
   try {
     const offlineOrders = await Order.find({ orderType: "offline" })
@@ -242,22 +255,24 @@ exports.getOfflineOrders = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
-    res.status(200).json({ msg: "Offline orders fetched", data: offlineOrders });
-
+    res
+      .status(200)
+      .json({ msg: "Offline orders fetched", data: offlineOrders });
   } catch (error) {
     res.status(500).json({ msg: error.message });
   }
 };
 
+//GET DAILY STATUS
 exports.getDailyStats = async (req, res) => {
   try {
-    // Awal hari (WIB)
+    // Tentukan waktu awal hari (konversi ke zona waktu WIB)
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const startOfDayUTC = new Date(startOfDay.getTime() - (7 * 60 * 60 * 1000));
+    const startOfDayUTC = new Date(startOfDay.getTime() - 7 * 60 * 60 * 1000);
 
-    // Total order online dan offline
+    // Hitung Total order online dan offline hari ini
     const totalOnlineOrders = await Order.countDocuments({
       orderType: "online",
       updatedAt: { $gte: startOfDayUTC },
@@ -268,7 +283,7 @@ exports.getDailyStats = async (req, res) => {
       updatedAt: { $gte: startOfDayUTC },
     });
 
-    // Revenue online (status completed saja)
+    // Hitung pendapatan online dari order berstatus 'completed'
     const completedOnlineOrders = await Order.find({
       orderType: "online",
       status: "completed",
@@ -280,7 +295,7 @@ exports.getDailyStats = async (req, res) => {
       0
     );
 
-    // Revenue offline ambil dari `amount`
+    // Hitung pendapatan offline dari totalPrice
     const completedOfflineOrders = await Order.find({
       orderType: "offline",
       updatedAt: { $gte: startOfDayUTC },
@@ -293,6 +308,7 @@ exports.getDailyStats = async (req, res) => {
 
     const totalRevenue = onlineRevenue + offlineRevenue;
 
+    // Kirim hasil statistik harian
     res.status(200).json({
       success: true,
       message: "Daily stats fetched successfully",
@@ -305,7 +321,6 @@ exports.getDailyStats = async (req, res) => {
         totalRevenue,
       },
     });
-
   } catch (error) {
     console.error(error);
     res.status(500).json({ success: false, msg: error.message });

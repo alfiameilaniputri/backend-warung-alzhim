@@ -11,7 +11,7 @@ exports.createProduct = async (req, res) => {
   try {
     const { name, description, condition, category, price, stock } = req.body;
 
-    // Validate required fields
+     // Validasi data wajib (nama, kategori, harga)
     if (!name || !category || !price) {
       return res.status(400).json({
         success: false,
@@ -19,7 +19,7 @@ exports.createProduct = async (req, res) => {
       });
     }
 
-    // Process images (if exists)
+     // Proses gambar jika diupload
     const images = req.files?.map((file) => `${file.filename}`) || [];
 
     const newProduct = await Product.create({
@@ -51,17 +51,15 @@ exports.createProduct = async (req, res) => {
 // Get all products
 exports.getAllProducts = async (req, res) => {
   try {
-    // 1. Ambil semua produk
+    // Ambil semua produk
     const products = await Product.find()
       .populate("category", "name")
       .sort({ createdAt: -1 });
 
-    // 2. Tambahkan sold + review + average rating
+    // Tambahkan data penjualan sold + review + average rating
     const productsWithExtraData = await Promise.all(
       products.map(async (product) => {
-        // =========================
         // HITUNG SOLD
-        // =========================
         const soldItems = await OrderItem.aggregate([
           {
             $match: { product: product._id },
@@ -90,16 +88,12 @@ exports.getAllProducts = async (req, res) => {
 
         const sold = soldItems[0]?.totalSold || 0;
 
-        // =========================
-        // AMBIL REVIEW
-        // =========================
+        // AMBIL REVIEW DARI PRODUK
         const reviews = await Review.find({ product: product._id })
           .populate("buyer", "name")
           .sort({ createdAt: -1 });
 
-        // =========================
-        // HITUNG AVERAGE RATING
-        // =========================
+        // HITUNG AVERAGE RATING DAN TOTAL REVIEW
         const ratingStats = await Review.aggregate([
           { $match: { product: product._id } },
           {
@@ -114,6 +108,7 @@ exports.getAllProducts = async (req, res) => {
         const averageRating = ratingStats[0]?.averageRating || 0;
         const totalReview = ratingStats[0]?.totalReview || 0;
 
+        // Gabungkan semua data tambahan
         return {
           ...product.toObject(),
           sold,
@@ -144,6 +139,7 @@ exports.getDetailProduct = async (req, res) => {
   try {
     const { id } = req.params;
 
+    // Validasi ID produk
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
@@ -151,6 +147,7 @@ exports.getDetailProduct = async (req, res) => {
       });
     }
 
+    // Ambil produk berdasarkan ID
     const product = await Product.findById(id).populate("category", "name");
 
     if (!product) {
@@ -175,12 +172,16 @@ exports.getDetailProduct = async (req, res) => {
   }
 };
 
+// SEARCH PRODUCT
 exports.searchProducts = async (req, res) => {
   try {
-    const { keyword = "", page = 1, limit = 20 } = req.query;
+    const { keyword = "", page = 1, limit = 20 } = req.query; // Ambil query dari URL
+
 
     const skip = (page - 1) * limit;
 
+    
+    // Pencarian produk berdasarkan nama atau kategori
     const products = await Product.aggregate([
       {
         $lookup: {
@@ -215,6 +216,7 @@ exports.searchProducts = async (req, res) => {
       { $limit: Number(limit) },
     ]);
 
+    // Hitung total data untuk pagination
     const totalData = await Product.countDocuments({
       name: { $regex: keyword, $options: "i" },
     });
@@ -240,6 +242,7 @@ exports.searchProducts = async (req, res) => {
   }
 };
 
+//UPDATE PRODUCTS
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;

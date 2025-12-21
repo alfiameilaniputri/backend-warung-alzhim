@@ -6,7 +6,7 @@ const Review = require("../models/Review");
 
 // 🔹 MIDTRANS CONFIG
 const snap = new midtransClient.Snap({
-  isProduction: false,
+  isProduction: false, // false = sandbox mode (pengujian)
   serverKey: process.env.MIDTRANS_SERVER_KEY,
   clientKey: process.env.MIDTRANS_CLIENT_KEY,
 });
@@ -17,12 +17,10 @@ const User = require("../models/User");
 
 exports.createOrder = async (req, res) => {
   try {
-    const { items } = req.body;
-    const buyerId = req.user.id;
+    const { items } = req.body; //ambil item pesanan dari body
+    const buyerId = req.user.id; // ambil id user/pembeli dari token login
 
-    // ===============================
-    // CEK ADMIN AKTIF
-    // ===============================
+    // Cek apakah admin(penjual) aktif
     const admin = await User.findOne({ role: "admin" });
 
     if (!admin) {
@@ -39,6 +37,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    //cek data pembeli
     const buyer = await User.findById(buyerId);
 
     if (!buyer) {
@@ -63,6 +62,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    // Validasi minimal ada satu item
     if (!items || items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -70,7 +70,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // Create empty order
+    // Buat order kosong
     const order = await Order.create({
       buyer: buyerId,
       items: [],
@@ -81,6 +81,7 @@ exports.createOrder = async (req, res) => {
     let totalPrice = 0;
     const orderItems = [];
 
+     // Loop setiap produk untuk menghitung subtotal dan mengurangi stok
     for (const item of items) {
       const product = await Product.findById(item.productId);
       if (!product) {
@@ -98,11 +99,12 @@ exports.createOrder = async (req, res) => {
       }
 
       const subtotal = product.price * item.quantity;
-      totalPrice += subtotal;
+      totalPrice += subtotal; 
 
-      product.stock -= item.quantity;
+      product.stock -= item.quantity; // kurangi stok
       await product.save();
 
+      // Simpan item ke tabel OrderItem
       const orderItem = await OrderItem.create({
         order: order._id,
         product: product._id,
@@ -114,11 +116,12 @@ exports.createOrder = async (req, res) => {
       orderItems.push(orderItem);
     }
 
+    // Update total dan item order utama
     order.items = orderItems.map((i) => i._id);
     order.totalPrice = totalPrice;
     await order.save();
 
-    // Midtrans
+    // Buat transaksi Midtrans
     const parameter = {
       transaction_details: {
         order_id: order._id.toString(),
@@ -135,25 +138,21 @@ exports.createOrder = async (req, res) => {
       },
     };
 
-    const transaction = await snap.createTransaction(parameter);
+    const transaction = await snap.createTransaction(parameter); // Kirim request ke Midtrans
 
+    // Simpan token dan redirect URL dari Midtrans
     order.snapToken = transaction.token;
     order.redirectUrl = transaction.redirect_url;
     await order.save();
 
-    // ===============================
-    // CREATE NOTIFICATIONS
-    // ===============================
-
-    // const buyer = await User.findById(buyerId);
-
-    // Notification to User
+    // Kirim Notification to User(pembeli)
     await Notification.create({
       user: buyerId,
       title: "Order Berhasil Dibuat",
       message: `Pesanan Anda berhasil dibuat. Silakan lanjutkan pembayaran.`,
     });
 
+    //kirim response sukses
     return res.status(201).json({
       success: true,
       message: "Order created successfully. Notifications sent.",
@@ -181,7 +180,7 @@ exports.createOrder = async (req, res) => {
 // 🔹 HANDLE MIDTRANS NOTIFICATION
 exports.paymentOrder = async (req, res) => {
   try {
-    const notification = req.body;
+    const notification = req.body; // Data notifikasi dari Midtrans
     const orderId = notification.order_id;
 
     const order = await Order.findById(orderId).populate("buyer");
@@ -190,9 +189,7 @@ exports.paymentOrder = async (req, res) => {
     const transactionStatus = notification.transaction_status;
     const paymentType = notification.payment_type;
 
-    // ==============================================
-    // GET REAL PAYMENT METHOD NAME FROM MIDTRANS DATA
-    // ==============================================
+    // Tentukan metode pembayaran sesuai data Midtrans
     let paymentMethod = "Midtrans";
 
     if (
@@ -214,22 +211,21 @@ exports.paymentOrder = async (req, res) => {
 
     let newStatus = order.status;
 
+    //Update status sesuai hasil tarnsaksi
     if (transactionStatus === "settlement" || transactionStatus === "capture") {
       newStatus = "paid";
       order.snapToken = null;
       order.redirectUrl = null;
       order.paymentMethod = paymentMethod;
 
-      // ============================
-      // CREATE NOTIFICATION EVENT
-      // ============================
-
+      //Buat notif untu user/pembeliu
       await Notification.create({
         user: order.buyer._id,
         title: "Pembayaran Berhasil",
         message: `Pembayaran untuk pesanan dengan ID ${order.orderId} telah berhasil menggunakan metode ${paymentMethod}. Pesanan Anda akan segera diproses.`,
       });
 
+      //kirim notifikasi ke admin
       const admins = await User.find({ role: "admin" });
       for (const admin of admins) {
         await Notification.create({
@@ -259,7 +255,7 @@ exports.paymentOrder = async (req, res) => {
   }
 };
 
-// 🔹 GET USER ORDERS
+// 🔹 GET SEMUA PESANA USER(PEMBELI)
 exports.getUserOrders = async (req, res) => {
   try {
     const orders = await Order.find({ buyer: req.user.id })
@@ -286,7 +282,7 @@ exports.getUserOrders = async (req, res) => {
   }
 };
 
-// 🔹 GET USER ORDER BY ID (with reviews)
+// 🔹 GET DETAIL USER ORDER BY ID (with reviews)
 exports.getDetailUserOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -308,7 +304,7 @@ exports.getDetailUserOrder = async (req, res) => {
       });
     }
 
-    // --- Tambahkan review ke setiap item secara manual ---
+    // Tambahkan data review pada setiap item
     const itemsWithReview = await Promise.all(
       order.items.map(async (item) => {
         const review = await Review.findOne({
@@ -342,7 +338,7 @@ exports.getDetailUserOrder = async (req, res) => {
   }
 };
 
-// 🔹 CONFIRM ORDER RECEIVED (Buyer)
+// KONFIRMASI PESANAN SELESAI (COMPLETED)
 exports.confirmOrderCompleted = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -357,7 +353,7 @@ exports.confirmOrderCompleted = async (req, res) => {
       });
     }
 
-    // Validate owner
+     // Pastikan user yang konfirmasi adalah pembelinya
     if (order.buyer._id.toString() !== userId) {
       return res.status(403).json({
         success: false,
@@ -365,7 +361,7 @@ exports.confirmOrderCompleted = async (req, res) => {
       });
     }
 
-    // Validate status
+     // Cek status pesanan sudah dikirim atau belum
     if (order.status !== "delivered") {
       return res.status(400).json({
         success: false,
@@ -373,11 +369,11 @@ exports.confirmOrderCompleted = async (req, res) => {
       });
     }
 
-    // Update status to completed
+    // Update status jadi completed
     order.status = "completed";
     await order.save();
 
-    // Update order items to confirmed
+    // Tandai item order sebagai dikonfirmasi
     const result = await OrderItem.updateMany(
       { order: orderId },
       { $set: { isConfirmed: true } }
@@ -385,7 +381,6 @@ exports.confirmOrderCompleted = async (req, res) => {
 
     // 🔍 Ambil admin users
     const admins = await User.find({ role: "admin" });
-
     // 🔔 Send notification to all admins
     for (const admin of admins) {
       await Notification.create({
